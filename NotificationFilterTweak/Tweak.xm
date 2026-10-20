@@ -47,6 +47,55 @@ static BOOL NFShouldDeleteFilteredNotifications(void) {
     return [NFCopyPreferencesSnapshot()[NFDeleteFilteredNotificationsKey] boolValue];
 }
 
+static BOOL NFShouldForwardToWeChat(void) {
+    return [NFCopyPreferencesSnapshot()[NFWeChatForwardKey] boolValue];
+}
+
+static NSArray<NSString *> *NFWeChatTargetList(void) {
+    NSString *raw = NFCopyPreferencesSnapshot()[NFWeChatTargetsKey];
+    if (![raw isKindOfClass:[NSString class]] || raw.length == 0) return @[];
+    NSMutableArray<NSString *> *targets = [NSMutableArray array];
+    for (NSString *piece in [raw componentsSeparatedByCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@",，;； "]]) {
+        NSString *t = [piece stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (t.length > 0) [targets addObject:t];
+    }
+    return targets;
+}
+
+static NSString *NFWeChatContainerPath(void) {
+    NSString *appsDir = @"/var/mobile/Containers/Data/Application";
+    NSArray *dirs = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:appsDir error:nil];
+    for (NSString *d in dirs) {
+        NSString *meta = [appsDir stringByAppendingPathComponent:
+            [NSString stringWithFormat:@"%@/.com.apple.mobile_container_manager.metadata.plist", d]];
+        NSDictionary *md = [NSDictionary dictionaryWithContentsOfFile:meta];
+        if ([[md objectForKey:@"MCMMetadataIdentifier"] isEqualToString:@"com.tencent.xin"]) {
+            return [appsDir stringByAppendingPathComponent:d];
+        }
+    }
+    return nil;
+}
+
+static void NFForwardMatchedRecordToWeChat(NFNotificationRecord *record) {
+    NSArray<NSString *> *targets = NFWeChatTargetList();
+    if (targets.count == 0) return;
+    NSString *text = record.joinedText.length > 0 ? record.joinedText : record.messageText;
+    if (text.length == 0) return;
+    NSString *container = NFWeChatContainerPath();
+    if (!container) return;
+    @try {
+        NSString *taskDir = [container stringByAppendingPathComponent:@"tmp/wxrelay_tasks"];
+        [[NSFileManager defaultManager] createDirectoryAtPath:taskDir withIntermediateDirectories:YES attributes:nil error:nil];
+        NSString *fn = [NSString stringWithFormat:@"task_%@.json", [[NSUUID UUID] UUIDString]];
+        NSDictionary *task = @{ @"targets": targets, @"text": text,
+            @"ts": [NSString stringWithFormat:@"%f", [NSDate date].timeIntervalSince1970] };
+        NSData *data = [NSJSONSerialization dataWithJSONObject:task options:NSJSONWritingPrettyPrinted error:nil];
+        [data writeToFile:[taskDir stringByAppendingPathComponent:fn] atomically:YES];
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+            (__bridge CFStringRef)@"com.mos.wxrelay.task", NULL, NULL, YES);
+    } @catch (NSException *e) { }
+}
+
 static void NFUpdatePreferencesSnapshot(NSDictionary *preferences) {
     dispatch_sync(NFPreferencesQueue, ^{
         NFCurrentPreferences = [preferences copy];
@@ -1205,6 +1254,12 @@ static void NFAttemptDeleteFilteredBulletin(id server,
 - (void)postNotificationWithRequest:(id)request {
     NFNotificationRecord *record = [NFNotificationRecord recordFromNotificationRequest:request];
     NFMatchResult *result = NFEvaluateRecord(record);
+    if (result.shouldBlock && NFShouldForwardToWeChat()) {
+        // 转发模式：命中规则 → 转发微信，通知照常展示（不过滤）
+        NFForwardMatchedRecordToWeChat(record);
+        %orig;
+        return;
+    }
     if (!result.shouldBlock) {
         %orig;
         return;

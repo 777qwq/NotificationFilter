@@ -98,6 +98,33 @@ static NSString * const NFPProjectPageURLString = @"https://github.com/tunecc/No
     [deleteSpecifier setProperty:@NO forKey:PSDefaultValueKey];
     [specifiers addObject:deleteSpecifier];
 
+    PSSpecifier *fwdGroup = [PSSpecifier emptyGroupSpecifier];
+    [fwdGroup setProperty:@"开启后，命中规则的不再过滤，而是把通知全文转发成微信消息发给目标 id（多个用逗号分隔）。规则复用上面配置的包含/正则规则，即时生效。" forKey:PSFooterTextGroupKey];
+    [specifiers addObject:fwdGroup];
+
+    PSSpecifier *fwdToggle = [PSSpecifier preferenceSpecifierNamed:@"转发到微信"
+                                                              target:self
+                                                                 set:@selector(setPreferenceValue:specifier:)
+                                                                 get:@selector(readPreferenceValue:)
+                                                              detail:nil
+                                                                 cell:PSSwitchCell
+                                                                 edit:nil];
+    [fwdToggle setProperty:NFWeChatForwardKey forKey:PSKeyNameKey];
+    [fwdToggle setProperty:@NO forKey:PSDefaultValueKey];
+    [specifiers addObject:fwdToggle];
+
+    PSSpecifier *fwdTargets = [PSSpecifier preferenceSpecifierNamed:@"转发目标 wxid"
+                                                              target:self
+                                                                 set:@selector(setPreferenceValue:specifier:)
+                                                                 get:@selector(readPreferenceValue:)
+                                                              detail:nil
+                                                                 cell:PSEditTextCell
+                                                                 edit:nil];
+    [fwdTargets setProperty:NFWeChatTargetsKey forKey:PSKeyNameKey];
+    [fwdTargets setProperty:@"" forKey:PSDefaultValueKey];
+    [fwdTargets setProperty:@"wxid_xxx,filehelper" forKey:PSPlaceholderKey];
+    [specifiers addObject:fwdTargets];
+
     PSSpecifier *logGroup = [PSSpecifier emptyGroupSpecifier];
     [logGroup setProperty:NFPLocalizedString(@"ROOT_LOG_ENABLED_FOOTER") forKey:PSFooterTextGroupKey];
     [specifiers addObject:logGroup];
